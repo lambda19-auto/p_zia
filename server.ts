@@ -1,7 +1,6 @@
 import express from 'express';
 import dotenv from 'dotenv';
 
-dotenv.config({ path: '.env' });
 dotenv.config();
 
 const app = express();
@@ -85,7 +84,7 @@ app.post('/api/recommendations', async (req, res) => {
       },
       body: JSON.stringify({
         model: 'gpt-5',
-        tools: [{ type: 'web_search_preview' }],
+        tools: [{ type: 'web_search' }],
         input: buildPrompt(body),
         text: {
           format: {
