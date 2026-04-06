@@ -4,12 +4,11 @@
  */
 
 import { useState } from 'react';
-import { GoogleGenAI, Type } from "@google/genai";
 import { 
   Search, 
-  MapPin, 
+  MapPin,
   Users, 
-  Sun, 
+  Sun,
   Wallet, 
   ExternalLink, 
   Loader2, 
@@ -17,19 +16,33 @@ import {
   Baby,
   Calendar,
   Compass,
-  Globe
+  Globe,
 } from 'lucide-react';
 import Markdown from 'react-markdown';
 import { motion, AnimatePresence } from 'motion/react';
 
-// Initialize GenAI
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+const OPENAI_API_URL = 'https://api.openai.com/v1/responses';
 
 interface TravelRecommendation {
   title: string;
   description: string;
   whyFits: string;
   estimatedCost: string;
+}
+
+interface OpenAIResponse {
+  output_text?: string;
+  output?: Array<{
+    content?: Array<{
+      annotations?: Array<{
+        type?: string;
+        url_citation?: {
+          title?: string;
+          url?: string;
+        };
+      }>;
+    }>;
+  }>;
 }
 
 export default function App() {
@@ -66,45 +79,71 @@ export default function App() {
         Отвечай на русском языке.
       `;
 
-      const response = await ai.models.generateContent({
-        model: "gemini-3.1-pro-preview",
-        contents: prompt,
-        config: {
-          tools: [{ googleSearch: {} }],
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.ARRAY,
-            items: {
-              type: Type.OBJECT,
-              properties: {
-                title: { type: Type.STRING, description: "Название направления" },
-                description: { type: Type.STRING, description: "Краткое описание" },
-                whyFits: { type: Type.STRING, description: "Почему этот вариант подходит под критерии" },
-                estimatedCost: { type: Type.STRING, description: "Примерная стоимость" },
+      const response = await fetch(OPENAI_API_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+        },
+        body: JSON.stringify({
+          model: 'gpt-5',
+          tools: [{ type: 'web_search_preview' }],
+          input: prompt,
+          text: {
+            format: {
+              type: 'json_schema',
+              name: 'travel_recommendations',
+              strict: true,
+              schema: {
+                type: 'array',
+                minItems: 3,
+                maxItems: 3,
+                items: {
+                  type: 'object',
+                  additionalProperties: false,
+                  properties: {
+                    title: { type: 'string', description: 'Название направления' },
+                    description: { type: 'string', description: 'Краткое описание' },
+                    whyFits: { type: 'string', description: 'Почему этот вариант подходит под критерии' },
+                    estimatedCost: { type: 'string', description: 'Примерная стоимость' },
+                  },
+                  required: ['title', 'description', 'whyFits', 'estimatedCost'],
+                },
               },
-              required: ["title", "description", "whyFits", "estimatedCost"],
             },
           },
-        },
+        }),
       });
 
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`OpenAI API error (${response.status}): ${errorText}`);
+      }
+
+      const data = (await response.json()) as OpenAIResponse;
+
       try {
-        const parsedResult = JSON.parse(response.text || "[]");
+        const parsedResult = JSON.parse(data.output_text || '[]');
         setResult(parsedResult);
       } catch (e) {
         console.error("JSON parse error:", e);
         setError("Не удалось обработать ответ от ИИ. Попробуйте еще раз.");
       }
       
-      // Extract grounding sources
-      const chunks = response.candidates?.[0]?.groundingMetadata?.groundingChunks;
-      if (chunks) {
-        const uniqueSources = chunks
-          .filter(c => c.web)
-          .map(c => ({ uri: c.web!.uri, title: c.web!.title }))
-          .filter((v, i, a) => a.findIndex(t => t.uri === v.uri) === i);
-        setSources(uniqueSources);
-      }
+      // Extract sources from web search annotations
+      const citations = (data.output || [])
+        .flatMap(item => item.content || [])
+        .flatMap(content => content.annotations || [])
+        .filter(annotation => annotation.type === 'url_citation' && annotation.url_citation?.url)
+        .map(annotation => ({
+          uri: annotation.url_citation!.url!,
+          title: annotation.url_citation!.title || annotation.url_citation!.url!,
+        }));
+
+      const uniqueSources = citations.filter((value, index, array) => (
+        array.findIndex(source => source.uri === value.uri) === index
+      ));
+      setSources(uniqueSources);
     } catch (error) {
       console.error("Search error:", error);
       setError("Произошла ошибка при поиске. Пожалуйста, попробуйте еще раз.");
