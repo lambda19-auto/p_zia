@@ -18,7 +18,6 @@ import {
   Compass,
   Globe,
 } from 'lucide-react';
-import Markdown from 'react-markdown';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface TravelRecommendation {
@@ -33,6 +32,15 @@ interface RecommendationsApiResponse {
   sources: { uri: string; title: string }[];
 }
 
+interface RecommendationsApiError {
+  error?: string;
+  debug?: {
+    code?: string;
+    hint?: string;
+    details?: string;
+  };
+}
+
 export default function App() {
   const [query, setQuery] = useState('');
   const [budget, setBudget] = useState('medium');
@@ -43,6 +51,22 @@ export default function App() {
   const [result, setResult] = useState<TravelRecommendation[] | null>(null);
   const [sources, setSources] = useState<{ uri: string; title: string }[]>([]);
   const [error, setError] = useState<string | null>(null);
+
+  const formatApiError = (status: number, payload: RecommendationsApiError, fallbackText: string) => {
+    const errorTitle = payload.error || fallbackText;
+    const codeLine = payload.debug?.code ? `Код: ${payload.debug.code}` : null;
+    const hintLine = payload.debug?.hint ? `Что проверить: ${payload.debug.hint}` : null;
+    const detailsLine = payload.debug?.details ? `Технические детали: ${payload.debug.details}` : null;
+
+    return [
+      `Ошибка ${status}: ${errorTitle}`,
+      codeLine,
+      hintLine,
+      detailsLine,
+    ]
+      .filter(Boolean)
+      .join('\n');
+  };
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -69,8 +93,22 @@ export default function App() {
       });
 
       if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Recommendations API error (${response.status}): ${errorText}`);
+        let errorPayload: RecommendationsApiError = {};
+        let rawText = '';
+
+        try {
+          errorPayload = (await response.json()) as RecommendationsApiError;
+        } catch {
+          rawText = await response.text();
+        }
+
+        const detailedMessage = formatApiError(
+          response.status,
+          errorPayload,
+          rawText || 'Неизвестная ошибка сервера.',
+        );
+
+        throw new Error(detailedMessage);
       }
 
       const data = (await response.json()) as RecommendationsApiResponse;
@@ -78,7 +116,8 @@ export default function App() {
       setSources(data.sources || []);
     } catch (error) {
       console.error("Search error:", error);
-      setError("Произошла ошибка при поиске. Пожалуйста, попробуйте еще раз.");
+      const detailedMessage = error instanceof Error ? error.message : String(error);
+      setError(detailedMessage || 'Произошла ошибка при поиске. Пожалуйста, попробуйте еще раз.');
     } finally {
       setLoading(false);
     }
@@ -245,9 +284,12 @@ export default function App() {
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              className="mt-8 p-4 bg-red-50 border border-red-200 text-red-600 rounded-xl text-center"
+              className="mt-8 p-4 bg-red-50 border border-red-200 text-red-600 rounded-xl"
             >
-              {error}
+              <p className="font-semibold mb-2">Не удалось получить рекомендации</p>
+              <pre className="whitespace-pre-wrap text-sm leading-relaxed font-mono bg-red-100/60 p-3 rounded-lg border border-red-200 overflow-x-auto">
+                {error}
+              </pre>
             </motion.div>
           )}
 

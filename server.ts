@@ -46,6 +46,33 @@ interface OpenAIResponsePayload {
   }>;
 }
 
+interface ApiErrorResponse {
+  error: string;
+  debug?: {
+    code: string;
+    hint: string;
+    details?: string;
+  };
+}
+
+const sendApiError = (
+  res: express.Response<ApiErrorResponse>,
+  status: number,
+  error: string,
+  code: string,
+  hint: string,
+  details?: string,
+) => {
+  return res.status(status).json({
+    error,
+    debug: {
+      code,
+      hint,
+      details,
+    },
+  });
+};
+
 const buildPrompt = (body: RecommendationsRequestBody): string => {
   const budget = body.budget || 'medium';
   const season = body.season || 'summer';
@@ -69,11 +96,23 @@ const buildPrompt = (body: RecommendationsRequestBody): string => {
 app.post('/api/recommendations', async (req, res) => {
   const body = req.body as RecommendationsRequestBody;
   if (!body.query || !body.query.trim()) {
-    return res.status(400).json({ error: 'Query is required.' });
+    return sendApiError(
+      res,
+      400,
+      'Query is required.',
+      'EMPTY_QUERY',
+      'Передайте в поле query текст запроса, например: "пляжный отдых".',
+    );
   }
 
   if (!process.env.OPENAI_API_KEY) {
-    return res.status(500).json({ error: 'OPENAI_API_KEY is not configured on server.' });
+    return sendApiError(
+      res,
+      500,
+      'OPENAI_API_KEY is not configured on server.',
+      'MISSING_OPENAI_API_KEY',
+      'Создайте .env файл и добавьте OPENAI_API_KEY=<ваш_ключ>, затем перезапустите сервер.',
+    );
   }
 
   try {
@@ -115,7 +154,14 @@ app.post('/api/recommendations', async (req, res) => {
 
     if (!openaiResponse.ok) {
       const errorText = await openaiResponse.text();
-      return res.status(openaiResponse.status).json({ error: errorText });
+      return sendApiError(
+        res,
+        openaiResponse.status,
+        'Failed to get response from OpenAI API.',
+        'OPENAI_HTTP_ERROR',
+        'Проверьте валидность OPENAI_API_KEY, лимиты аккаунта и доступ к сети.',
+        errorText,
+      );
     }
 
     const data = (await openaiResponse.json()) as OpenAIResponsePayload;
@@ -138,7 +184,15 @@ app.post('/api/recommendations', async (req, res) => {
     return res.json({ recommendations, sources });
   } catch (error) {
     console.error('Recommendations API error:', error);
-    return res.status(500).json({ error: 'Failed to get travel recommendations.' });
+    const details = error instanceof Error ? error.message : String(error);
+    return sendApiError(
+      res,
+      500,
+      'Failed to get travel recommendations.',
+      'RECOMMENDATIONS_UNEXPECTED_ERROR',
+      'Проверьте логи сервера и ответ OpenAI. Частая причина — невалидный JSON в ответе модели.',
+      details,
+    );
   }
 });
 
