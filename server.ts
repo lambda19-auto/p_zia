@@ -1,5 +1,6 @@
 import express from 'express';
 import dotenv from 'dotenv';
+import { randomUUID } from 'node:crypto';
 
 dotenv.config();
 
@@ -8,6 +9,55 @@ const PORT = Number(process.env.PORT || 8787);
 const OPENAI_API_URL = 'https://api.openai.com/v1/responses';
 
 app.use(express.json());
+
+type LogLevel = 'info' | 'warn' | 'error';
+
+const log = (level: LogLevel, message: string, context?: Record<string, unknown>) => {
+  const entry = {
+    timestamp: new Date().toISOString(),
+    level,
+    message,
+    context,
+  };
+
+  if (level === 'error') {
+    console.error(JSON.stringify(entry));
+    return;
+  }
+
+  if (level === 'warn') {
+    console.warn(JSON.stringify(entry));
+    return;
+  }
+
+  console.log(JSON.stringify(entry));
+};
+
+app.use((req, res, next) => {
+  const startedAt = Date.now();
+  const requestId = randomUUID();
+
+  res.locals.requestId = requestId;
+  res.setHeader('x-request-id', requestId);
+
+  log('info', 'Incoming request', {
+    requestId,
+    method: req.method,
+    path: req.path,
+  });
+
+  res.on('finish', () => {
+    log('info', 'Request completed', {
+      requestId,
+      method: req.method,
+      path: req.path,
+      statusCode: res.statusCode,
+      durationMs: Date.now() - startedAt,
+    });
+  });
+
+  next();
+});
 
 type Budget = 'low' | 'medium' | 'high';
 
@@ -109,9 +159,11 @@ const buildPrompt = (body: RecommendationsRequestBody): string => {
 };
 
 app.post('/api/recommendations', async (req, res) => {
+  const requestId = String(res.locals.requestId || 'unknown');
   const body = req.body as RecommendationsRequestBody;
 
   if (!body.query || !body.query.trim()) {
+    log('warn', 'Validation failed: empty query', { requestId });
     return sendApiError(
       res,
       400,
@@ -122,6 +174,7 @@ app.post('/api/recommendations', async (req, res) => {
   }
 
   if (!process.env.OPENAI_API_KEY) {
+    log('error', 'Missing OPENAI_API_KEY', { requestId });
     return sendApiError(
       res,
       500,
@@ -132,6 +185,15 @@ app.post('/api/recommendations', async (req, res) => {
   }
 
   try {
+    log('info', 'Calling OpenAI responses API', {
+      requestId,
+      budget: body.budget || 'medium',
+      season: body.season || 'summer',
+      travelers: Math.max(1, Number(body.travelers || 1)),
+      hasChildren: Boolean(body.hasChildren),
+    });
+
+    const openaiStartedAt = Date.now();
     const openaiResponse = await fetch(OPENAI_API_URL, {
       method: 'POST',
       headers: {
@@ -190,6 +252,12 @@ app.post('/api/recommendations', async (req, res) => {
 
     if (!openaiResponse.ok) {
       const errorText = await openaiResponse.text();
+      log('error', 'OpenAI API request failed', {
+        requestId,
+        statusCode: openaiResponse.status,
+        durationMs: Date.now() - openaiStartedAt,
+        details: errorText,
+      });
       return sendApiError(
         res,
         openaiResponse.status,
@@ -201,6 +269,11 @@ app.post('/api/recommendations', async (req, res) => {
     }
 
     const data = (await openaiResponse.json()) as OpenAIResponsePayload;
+    log('info', 'OpenAI API request succeeded', {
+      requestId,
+      statusCode: openaiResponse.status,
+      durationMs: Date.now() - openaiStartedAt,
+    });
 
     const outputTextItems = (data.output || [])
       .flatMap((item) => item.content || [])
@@ -215,6 +288,7 @@ app.post('/api/recommendations', async (req, res) => {
       .trim();
 
     if (!jsonText) {
+      log('error', 'OpenAI returned empty output_text', { requestId });
       return sendApiError(
         res,
         502,
@@ -228,6 +302,7 @@ app.post('/api/recommendations', async (req, res) => {
     const parsed = JSON.parse(jsonText) as ParsedRecommendationsPayload;
 
     if (!parsed || !Array.isArray(parsed.recommendations)) {
+      log('error', 'OpenAI returned invalid structured payload', { requestId });
       return sendApiError(
         res,
         502,
@@ -249,9 +324,17 @@ app.post('/api/recommendations', async (req, res) => {
         .filter((source, index, array) => array.findIndex((item) => item.url === source.url) === index),
     }));
 
+    log('info', 'Recommendations generated', {
+      requestId,
+      recommendationsCount: recommendations.length,
+    });
+
     return res.json({ recommendations });
   } catch (error) {
-    console.error('Recommendations API error:', error);
+    log('error', 'Recommendations API error', {
+      requestId,
+      error: error instanceof Error ? error.stack || error.message : String(error),
+    });
     const details = error instanceof Error ? error.message : String(error);
 
     return sendApiError(
@@ -266,5 +349,5 @@ app.post('/api/recommendations', async (req, res) => {
 });
 
 app.listen(PORT, () => {
-  console.log(`API server listening on port ${PORT}`);
+  log('info', `API server listening on port ${PORT}`);
 });
