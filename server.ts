@@ -8,8 +8,6 @@ const app = express();
 const PORT = Number(process.env.PORT || 8787);
 const OPENAI_API_URL = 'https://api.openai.com/v1/responses';
 
-app.use(express.json());
-
 type LogLevel = 'info' | 'warn' | 'error';
 
 const log = (level: LogLevel, message: string, context?: Record<string, unknown>) => {
@@ -58,6 +56,8 @@ app.use((req, res, next) => {
 
   next();
 });
+
+app.use(express.json());
 
 type Budget = 'low' | 'medium' | 'high';
 
