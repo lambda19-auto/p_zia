@@ -59,6 +59,18 @@ export default function App() {
     }
   };
 
+  const getSafeHttpUrl = (url: string) => {
+    try {
+      const parsedUrl = new URL(url);
+      if (parsedUrl.protocol === 'http:' || parsedUrl.protocol === 'https:') {
+        return parsedUrl.toString();
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  };
+
   const formatApiError = (status: number, payload: RecommendationsApiError, fallbackText: string) => {
     const errorTitle = payload.error || fallbackText;
     const codeLine = payload.debug?.code ? `Код: ${payload.debug.code}` : null;
@@ -349,23 +361,30 @@ export default function App() {
                             </p>
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                               {option.sources.map((source, sourceIdx) => (
-                                <a
-                                  key={`${source.url}-${sourceIdx}`}
-                                  href={source.url}
-                                  target="_blank"
-                                  rel="noopener noreferrer"
-                                  className="flex items-start p-3 rounded-lg border border-slate-200 hover:border-blue-400 hover:bg-blue-50/30 transition-all group"
-                                >
-                                  <Globe className="w-4 h-4 mt-0.5 mr-2 text-slate-400 group-hover:text-blue-500 shrink-0" />
-                                  <span className="min-w-0">
-                                    <span className="block text-xs font-semibold text-slate-800 group-hover:text-blue-700 line-clamp-2">
-                                      {source.title || 'Перейти на сайт'}
-                                    </span>
-                                    <span className="block text-[10px] text-slate-400 truncate">
-                                      {getHostname(source.url)}
-                                    </span>
-                                  </span>
-                                </a>
+                                (() => {
+                                  const safeSourceUrl = getSafeHttpUrl(source.url);
+                                  if (!safeSourceUrl) return null;
+
+                                  return (
+                                    <a
+                                      key={`${safeSourceUrl}-${sourceIdx}`}
+                                      href={safeSourceUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="flex items-start p-3 rounded-lg border border-slate-200 hover:border-blue-400 hover:bg-blue-50/30 transition-all group"
+                                    >
+                                      <Globe className="w-4 h-4 mt-0.5 mr-2 text-slate-400 group-hover:text-blue-500 shrink-0" />
+                                      <span className="min-w-0">
+                                        <span className="block text-xs font-semibold text-slate-800 group-hover:text-blue-700 line-clamp-2">
+                                          {source.title || 'Перейти на сайт'}
+                                        </span>
+                                        <span className="block text-[10px] text-slate-400 truncate">
+                                          {getHostname(safeSourceUrl)}
+                                        </span>
+                                      </span>
+                                    </a>
+                                  );
+                                })()
                               ))}
                             </div>
                           </div>
