@@ -24,6 +24,12 @@ interface Recommendation {
   description: string;
   whyFits: string;
   estimatedCost: string;
+  sources: SourceLink[];
+}
+
+interface SourceLink {
+  title: string;
+  url: string;
 }
 
 interface OpenAIOutputTextContent {
@@ -96,6 +102,7 @@ const buildPrompt = (body: RecommendationsRequestBody): string => {
 - description: краткое описание
 - whyFits: почему этот вариант подходит под критерии
 - estimatedCost: примерная стоимость
+- sources: минимум 1 источник c полями title и url
 
 Отвечай строго в формате JSON по заданной схеме, на русском языке.
   `.trim();
@@ -156,8 +163,21 @@ app.post('/api/recommendations', async (req, res) => {
                       description: { type: 'string', description: 'Краткое описание' },
                       whyFits: { type: 'string', description: 'Почему этот вариант подходит под критерии' },
                       estimatedCost: { type: 'string', description: 'Примерная стоимость' },
+                      sources: {
+                        type: 'array',
+                        minItems: 1,
+                        items: {
+                          type: 'object',
+                          additionalProperties: false,
+                          properties: {
+                            title: { type: 'string' },
+                            url: { type: 'string' },
+                          },
+                          required: ['title', 'url'],
+                        },
+                      },
                     },
-                    required: ['title', 'description', 'whyFits', 'estimatedCost'],
+                    required: ['title', 'description', 'whyFits', 'estimatedCost', 'sources'],
                   },
                 },
               },
@@ -218,18 +238,18 @@ app.post('/api/recommendations', async (req, res) => {
       );
     }
 
-    const recommendations = parsed.recommendations;
+    const recommendations = parsed.recommendations.map((recommendation) => ({
+      ...recommendation,
+      sources: (recommendation.sources || [])
+        .filter((source) => source && typeof source.url === 'string' && source.url.trim())
+        .map((source) => ({
+          title: source.title || source.url,
+          url: source.url,
+        }))
+        .filter((source, index, array) => array.findIndex((item) => item.url === source.url) === index),
+    }));
 
-    const sources = outputTextItems
-      .flatMap((item) => item.annotations || [])
-      .filter((annotation) => annotation.type === 'url_citation' && annotation.url_citation?.url)
-      .map((annotation) => ({
-        uri: annotation.url_citation!.url!,
-        title: annotation.url_citation!.title || annotation.url_citation!.url!,
-      }))
-      .filter((source, index, array) => array.findIndex((item) => item.uri === source.uri) === index);
-
-    return res.json({ recommendations, sources });
+    return res.json({ recommendations });
   } catch (error) {
     console.error('Recommendations API error:', error);
     const details = error instanceof Error ? error.message : String(error);
