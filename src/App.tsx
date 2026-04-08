@@ -25,11 +25,11 @@ interface TravelRecommendation {
   description: string;
   whyFits: string;
   estimatedCost: string;
+  sources: { title: string; url: string }[];
 }
 
 interface RecommendationsApiResponse {
   recommendations: TravelRecommendation[];
-  sources: { uri: string; title: string }[];
 }
 
 interface RecommendationsApiError {
@@ -49,8 +49,15 @@ export default function App() {
   const [hasChildren, setHasChildren] = useState(false);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<TravelRecommendation[] | null>(null);
-  const [sources, setSources] = useState<{ uri: string; title: string }[]>([]);
   const [error, setError] = useState<string | null>(null);
+
+  const getHostname = (url: string) => {
+    try {
+      return new URL(url).hostname;
+    } catch {
+      return url;
+    }
+  };
 
   const formatApiError = (status: number, payload: RecommendationsApiError, fallbackText: string) => {
     const errorTitle = payload.error || fallbackText;
@@ -74,7 +81,6 @@ export default function App() {
 
     setLoading(true);
     setResult(null);
-    setSources([]);
     setError(null);
 
     try {
@@ -113,7 +119,6 @@ export default function App() {
 
       const data = (await response.json()) as RecommendationsApiResponse;
       setResult(data.recommendations || []);
-      setSources(data.sources || []);
     } catch (error) {
       console.error("Search error:", error);
       const detailedMessage = error instanceof Error ? error.message : String(error);
@@ -336,47 +341,40 @@ export default function App() {
                           </p>
                           <p className="text-sm text-slate-900 font-medium">{option.estimatedCost}</p>
                         </div>
+
+                        {option.sources?.length > 0 && (
+                          <div className="bg-white p-4 rounded-xl border border-slate-200">
+                            <p className="text-sm font-bold text-slate-700 mb-3 flex items-center">
+                              <ExternalLink className="w-4 h-4 mr-1" /> Источники:
+                            </p>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              {option.sources.map((source, sourceIdx) => (
+                                <a
+                                  key={`${source.url}-${sourceIdx}`}
+                                  href={source.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="flex items-start p-3 rounded-lg border border-slate-200 hover:border-blue-400 hover:bg-blue-50/30 transition-all group"
+                                >
+                                  <Globe className="w-4 h-4 mt-0.5 mr-2 text-slate-400 group-hover:text-blue-500 shrink-0" />
+                                  <span className="min-w-0">
+                                    <span className="block text-xs font-semibold text-slate-800 group-hover:text-blue-700 line-clamp-2">
+                                      {source.title || 'Перейти на сайт'}
+                                    </span>
+                                    <span className="block text-[10px] text-slate-400 truncate">
+                                      {getHostname(source.url)}
+                                    </span>
+                                  </span>
+                                </a>
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </motion.div>
                 ))}
               </div>
-
-              {sources.length > 0 && (
-                <div className="space-y-4">
-                  <h3 className="text-lg font-bold text-slate-800 flex items-center px-2">
-                    <ExternalLink className="w-5 h-5 mr-2 text-blue-600" />
-                    Источники и полезные ссылки
-                  </h3>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-                    {sources.map((source, idx) => (
-                      <motion.a
-                        key={idx}
-                        href={source.uri}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        initial={{ opacity: 0, scale: 0.9 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        transition={{ delay: idx * 0.05 }}
-                        className="flex flex-col p-4 bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-md hover:border-blue-400 hover:bg-blue-50/30 transition-all group relative overflow-hidden"
-                      >
-                        <div className="absolute top-0 left-0 w-1 h-full bg-blue-500 opacity-0 group-hover:opacity-100 transition-opacity" />
-                        <div className="mb-2">
-                          <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center group-hover:bg-blue-100 transition-colors">
-                            <Globe className="w-4 h-4 text-slate-400 group-hover:text-blue-500 transition-colors" />
-                          </div>
-                        </div>
-                        <p className="text-xs font-bold text-slate-800 line-clamp-2 mb-1 group-hover:text-blue-700 transition-colors">
-                          {source.title || 'Перейти на сайт'}
-                        </p>
-                        <p className="text-[10px] text-slate-400 truncate mt-auto">
-                          {new URL(source.uri).hostname}
-                        </p>
-                      </motion.a>
-                    ))}
-                  </div>
-                </div>
-              )}
             </motion.div>
           )}
         </AnimatePresence>
