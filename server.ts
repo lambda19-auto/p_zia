@@ -1,7 +1,6 @@
 import express from 'express';
 import dotenv from 'dotenv';
 
-dotenv.config({ path: '.env' });
 dotenv.config();
 
 const app = express();
@@ -46,6 +45,10 @@ interface OpenAIResponsePayload {
   }>;
 }
 
+interface ParsedRecommendationsPayload {
+  recommendations: Recommendation[];
+}
+
 interface ApiErrorResponse {
   error: string;
   debug?: {
@@ -88,13 +91,19 @@ const buildPrompt = (body: RecommendationsRequestBody): string => {
 - С детьми: ${hasChildren ? 'Да' : 'Нет'}
 
 Найди топ-3 лучших варианта для отдыха, соответствующих этим критериям.
-Для каждого варианта напиши название, краткое описание, почему он подходит, и примерную стоимость.
-Отвечай на русском языке.
+Для каждого варианта напиши:
+- title: название направления
+- description: краткое описание
+- whyFits: почему этот вариант подходит под критерии
+- estimatedCost: примерная стоимость
+
+Отвечай строго в формате JSON по заданной схеме, на русском языке.
   `.trim();
 };
 
 app.post('/api/recommendations', async (req, res) => {
   const body = req.body as RecommendationsRequestBody;
+
   if (!body.query || !body.query.trim()) {
     return sendApiError(
       res,
@@ -124,7 +133,7 @@ app.post('/api/recommendations', async (req, res) => {
       },
       body: JSON.stringify({
         model: 'gpt-5',
-        tools: [{ type: 'web_search_preview' }],
+        tools: [{ type: 'web_search' }],
         input: buildPrompt(body),
         text: {
           format: {
@@ -132,20 +141,27 @@ app.post('/api/recommendations', async (req, res) => {
             name: 'travel_recommendations',
             strict: true,
             schema: {
-              type: 'array',
-              minItems: 3,
-              maxItems: 3,
-              items: {
-                type: 'object',
-                additionalProperties: false,
-                properties: {
-                  title: { type: 'string', description: 'Название направления' },
-                  description: { type: 'string', description: 'Краткое описание' },
-                  whyFits: { type: 'string', description: 'Почему этот вариант подходит под критерии' },
-                  estimatedCost: { type: 'string', description: 'Примерная стоимость' },
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                recommendations: {
+                  type: 'array',
+                  minItems: 3,
+                  maxItems: 3,
+                  items: {
+                    type: 'object',
+                    additionalProperties: false,
+                    properties: {
+                      title: { type: 'string', description: 'Название направления' },
+                      description: { type: 'string', description: 'Краткое описание' },
+                      whyFits: { type: 'string', description: 'Почему этот вариант подходит под критерии' },
+                      estimatedCost: { type: 'string', description: 'Примерная стоимость' },
+                    },
+                    required: ['title', 'description', 'whyFits', 'estimatedCost'],
+                  },
                 },
-                required: ['title', 'description', 'whyFits', 'estimatedCost'],
               },
+              required: ['recommendations'],
             },
           },
         },
@@ -165,12 +181,44 @@ app.post('/api/recommendations', async (req, res) => {
     }
 
     const data = (await openaiResponse.json()) as OpenAIResponsePayload;
+
     const outputTextItems = (data.output || [])
       .flatMap((item) => item.content || [])
-      .filter((content): content is OpenAIOutputTextContent => content.type === 'output_text' && typeof content.text === 'string');
+      .filter(
+        (content): content is OpenAIOutputTextContent =>
+          content.type === 'output_text' && typeof content.text === 'string',
+      );
 
-    const jsonText = outputTextItems.map((item) => item.text || '').join('\n').trim();
-    const recommendations = JSON.parse(jsonText || '[]') as Recommendation[];
+    const jsonText = outputTextItems
+      .map((item) => item.text || '')
+      .join('\n')
+      .trim();
+
+    if (!jsonText) {
+      return sendApiError(
+        res,
+        502,
+        'OpenAI returned an empty structured response.',
+        'OPENAI_EMPTY_OUTPUT_TEXT',
+        'Проверьте формат ответа модели и наличие output_text в payload.',
+        JSON.stringify(data),
+      );
+    }
+
+    const parsed = JSON.parse(jsonText) as ParsedRecommendationsPayload;
+
+    if (!parsed || !Array.isArray(parsed.recommendations)) {
+      return sendApiError(
+        res,
+        502,
+        'OpenAI returned an invalid structured payload.',
+        'OPENAI_INVALID_STRUCTURED_PAYLOAD',
+        'Ожидался объект вида { recommendations: [...] }.',
+        jsonText,
+      );
+    }
+
+    const recommendations = parsed.recommendations;
 
     const sources = outputTextItems
       .flatMap((item) => item.annotations || [])
@@ -185,6 +233,7 @@ app.post('/api/recommendations', async (req, res) => {
   } catch (error) {
     console.error('Recommendations API error:', error);
     const details = error instanceof Error ? error.message : String(error);
+
     return sendApiError(
       res,
       500,
