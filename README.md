@@ -27,6 +27,13 @@ docker run --rm -p 8787:8787 --env-file .env ai-studio-app
 
 ## Run with Docker Compose
 
+- `docker-compose.yml` — production (SSL)
+- `docker-compose.dev.yml` — without SSL (nginx on port 80 for local testing)
+
 ```bash
+# dev
+docker compose -f docker-compose.dev.yml up --build
+
+# prod
 docker compose up --build
 ```
