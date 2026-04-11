@@ -110,27 +110,31 @@ export default function App() {
         }),
       });
 
+      const rawText = await response.text();
+      let parsedPayload: RecommendationsApiResponse | RecommendationsApiError | null = null;
+
+      try {
+        parsedPayload = JSON.parse(rawText) as RecommendationsApiResponse | RecommendationsApiError;
+      } catch {
+        parsedPayload = null;
+      }
+
       if (!response.ok) {
-        let errorPayload: RecommendationsApiError = {};
-        let rawText = '';
-
-        try {
-          errorPayload = (await response.json()) as RecommendationsApiError;
-        } catch {
-          rawText = await response.text();
-        }
-
         const detailedMessage = formatApiError(
           response.status,
-          errorPayload,
+          (parsedPayload as RecommendationsApiError) || {},
           rawText || 'Неизвестная ошибка сервера.',
         );
 
         throw new Error(detailedMessage);
       }
 
-      const data = (await response.json()) as RecommendationsApiResponse;
-      setResult(data.recommendations || []);
+      const data = parsedPayload as RecommendationsApiResponse;
+      if (!data || !Array.isArray(data.recommendations)) {
+        throw new Error('Сервер вернул некорректный формат данных.');
+      }
+
+      setResult(data.recommendations);
     } catch (error) {
       console.error("Search error:", error);
       const detailedMessage = error instanceof Error ? error.message : String(error);
