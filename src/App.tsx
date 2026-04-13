@@ -34,11 +34,6 @@ interface RecommendationsApiResponse {
 
 interface RecommendationsApiError {
   error?: string;
-  debug?: {
-    code?: string;
-    hint?: string;
-    details?: string;
-  };
 }
 
 export default function App() {
@@ -72,19 +67,19 @@ export default function App() {
   };
 
   const formatApiError = (status: number, payload: RecommendationsApiError, fallbackText: string) => {
-    const errorTitle = payload.error || fallbackText;
-    const codeLine = payload.debug?.code ? `Код: ${payload.debug.code}` : null;
-    const hintLine = payload.debug?.hint ? `Что проверить: ${payload.debug.hint}` : null;
-    const detailsLine = payload.debug?.details ? `Технические детали: ${payload.debug.details}` : null;
+    if (status === 400) {
+      return 'Пожалуйста, уточните запрос и попробуйте снова.';
+    }
 
-    return [
-      `Ошибка ${status}: ${errorTitle}`,
-      codeLine,
-      hintLine,
-      detailsLine,
-    ]
-      .filter(Boolean)
-      .join('\n');
+    if (status === 429) {
+      return 'Сервис сейчас сильно загружен. Попробуйте еще раз через пару минут.';
+    }
+
+    if (status >= 500) {
+      return 'Сейчас не удалось подобрать рекомендации. Попробуйте еще раз чуть позже.';
+    }
+
+    return payload.error || fallbackText || 'Что-то пошло не так. Попробуйте снова.';
   };
 
   const handleSearch = async (e: React.FormEvent) => {
@@ -123,7 +118,7 @@ export default function App() {
         const detailedMessage = formatApiError(
           response.status,
           (parsedPayload as RecommendationsApiError) || {},
-          rawText || 'Неизвестная ошибка сервера.',
+          rawText || 'Не удалось получить ответ от сервиса.',
         );
 
         throw new Error(detailedMessage);
@@ -131,14 +126,14 @@ export default function App() {
 
       const data = parsedPayload as RecommendationsApiResponse;
       if (!data || !Array.isArray(data.recommendations)) {
-        throw new Error('Сервер вернул некорректный формат данных.');
+        throw new Error('Не удалось обработать ответ сервиса. Попробуйте снова.');
       }
 
       setResult(data.recommendations);
     } catch (error) {
       console.error("Search error:", error);
-      const detailedMessage = error instanceof Error ? error.message : String(error);
-      setError(detailedMessage || 'Произошла ошибка при поиске. Пожалуйста, попробуйте еще раз.');
+      const message = error instanceof Error ? error.message : '';
+      setError(message || 'Не удалось выполнить поиск. Пожалуйста, попробуйте еще раз.');
     } finally {
       setLoading(false);
     }
@@ -308,7 +303,7 @@ export default function App() {
               className="mt-8 p-4 bg-red-50 border border-red-200 text-red-600 rounded-xl"
             >
               <p className="font-semibold mb-2">Не удалось получить рекомендации</p>
-              <pre className="whitespace-pre-wrap text-sm leading-relaxed font-mono bg-red-100/60 p-3 rounded-lg border border-red-200 overflow-x-auto">
+              <pre className="whitespace-pre-wrap text-sm leading-relaxed bg-red-100/60 p-3 rounded-lg border border-red-200 overflow-x-auto">
                 {error}
               </pre>
             </motion.div>
