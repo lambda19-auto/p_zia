@@ -49,7 +49,7 @@ Optional local folders (for persistent logs):
 ```bash
 cd p_zia
 
-docker login ghcr.io
+docker login ...
 
 docker compose -f docker-compose.yml pull
 docker compose -f docker-compose.yml up -d
