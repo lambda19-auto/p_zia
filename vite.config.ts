@@ -12,6 +12,7 @@ export default defineConfig(() => {
       },
     },
     server: {
+      allowedHosts: ['travelai.top'],
       proxy: {
         '/api': 'http://localhost:8787',
       },
