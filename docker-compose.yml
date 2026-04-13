@@ -1,6 +1,6 @@
 services:
   nginx:
-    image: ghcr.io/your-org/p_zia-nginx:latest
+    image: lambda19main/p_zia-nginx:latest
     ports:
       - "443:443"
     volumes:
@@ -12,14 +12,14 @@ services:
     restart: unless-stopped
 
   frontend:
-    image: ghcr.io/your-org/p_zia-frontend:latest
+    image: lambda19main/p_zia-frontend:latest
     expose:
       - "3000"
     command: sh -c "npm run build && npm run preview -- --host 0.0.0.0 --port 3000"
     restart: unless-stopped
 
   app:
-    image: ghcr.io/your-org/p_zia-app:latest
+    image: lambda19main/p_zia-app:latest
     env_file:
       - .env
     environment:
