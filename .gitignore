@@ -11,3 +11,5 @@ coverage/
 logs/
 nginx/certs/*.pem
 nginx/certs/*.key
+tls/*.pem
+tls/*.key
