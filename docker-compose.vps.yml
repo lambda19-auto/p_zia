@@ -1,0 +1,33 @@
+services:
+  nginx:
+    image: ghcr.io/your-org/p_zia-nginx:latest
+    ports:
+      - "443:443"
+    volumes:
+      - ./tls:/etc/nginx/certs:ro
+      - ./logs/nginx:/var/log/nginx
+    depends_on:
+      - frontend
+      - app
+    restart: unless-stopped
+
+  frontend:
+    image: ghcr.io/your-org/p_zia-frontend:latest
+    expose:
+      - "3000"
+    command: sh -c "npm run build && npm run preview -- --host 0.0.0.0 --port 3000"
+    restart: unless-stopped
+
+  app:
+    image: ghcr.io/your-org/p_zia-app:latest
+    env_file:
+      - .env
+    environment:
+      - PORT=8787
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+    expose:
+      - "8787"
+    volumes:
+      - ./logs/app:/usr/src/app/logs
+    command: sh -c "npm run api 2>&1 | tee -a /usr/src/app/logs/api.log"
+    restart: unless-stopped
