@@ -35,7 +35,7 @@ docker compose up --build
 Create a directory on VPS (for example `/p_zia`) and upload:
 
 - `.env`
-- `docker-compose.vps.yml`
+- `docker-compose.yml`
 - `tls/fullchain.pem`
 - `tls/privkey.pem`
 
