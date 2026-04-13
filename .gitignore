@@ -6,3 +6,8 @@ coverage/
 *.log
 .env*
 !.env.example
+
+# Docker runtime artifacts
+logs/
+nginx/certs/*.pem
+nginx/certs/*.key

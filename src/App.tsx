@@ -18,7 +18,6 @@ import {
   Compass,
   Globe,
 } from 'lucide-react';
-import Markdown from 'react-markdown';
 import { motion, AnimatePresence } from 'motion/react';
 
 interface TravelRecommendation {
@@ -26,11 +25,15 @@ interface TravelRecommendation {
   description: string;
   whyFits: string;
   estimatedCost: string;
+  sources: { title: string; url: string }[];
 }
 
 interface RecommendationsApiResponse {
   recommendations: TravelRecommendation[];
-  sources: { uri: string; title: string }[];
+}
+
+interface RecommendationsApiError {
+  error?: string;
 }
 
 export default function App() {
@@ -41,8 +44,43 @@ export default function App() {
   const [hasChildren, setHasChildren] = useState(false);
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<TravelRecommendation[] | null>(null);
-  const [sources, setSources] = useState<{ uri: string; title: string }[]>([]);
   const [error, setError] = useState<string | null>(null);
+
+  const getHostname = (url: string) => {
+    try {
+      return new URL(url).hostname;
+    } catch {
+      return url;
+    }
+  };
+
+  const getSafeHttpUrl = (url: string) => {
+    try {
+      const parsedUrl = new URL(url);
+      if (parsedUrl.protocol === 'http:' || parsedUrl.protocol === 'https:') {
+        return parsedUrl.toString();
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  };
+
+  const formatApiError = (status: number, payload: RecommendationsApiError, fallbackText: string) => {
+    if (status === 400) {
+      return 'Пожалуйста, уточните запрос и попробуйте снова.';
+    }
+
+    if (status === 429) {
+      return 'Сервис сейчас сильно загружен. Попробуйте еще раз через пару минут.';
+    }
+
+    if (status >= 500) {
+      return 'Сейчас не удалось подобрать рекомендации. Попробуйте еще раз чуть позже.';
+    }
+
+    return payload.error || fallbackText || 'Что-то пошло не так. Попробуйте снова.';
+  };
 
   const handleSearch = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -50,7 +88,6 @@ export default function App() {
 
     setLoading(true);
     setResult(null);
-    setSources([]);
     setError(null);
 
     try {
@@ -68,17 +105,35 @@ export default function App() {
         }),
       });
 
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`Recommendations API error (${response.status}): ${errorText}`);
+      const rawText = await response.text();
+      let parsedPayload: RecommendationsApiResponse | RecommendationsApiError | null = null;
+
+      try {
+        parsedPayload = JSON.parse(rawText) as RecommendationsApiResponse | RecommendationsApiError;
+      } catch {
+        parsedPayload = null;
       }
 
-      const data = (await response.json()) as RecommendationsApiResponse;
-      setResult(data.recommendations || []);
-      setSources(data.sources || []);
+      if (!response.ok) {
+        const detailedMessage = formatApiError(
+          response.status,
+          (parsedPayload as RecommendationsApiError) || {},
+          rawText || 'Не удалось получить ответ от сервиса.',
+        );
+
+        throw new Error(detailedMessage);
+      }
+
+      const data = parsedPayload as RecommendationsApiResponse;
+      if (!data || !Array.isArray(data.recommendations)) {
+        throw new Error('Не удалось обработать ответ сервиса. Попробуйте снова.');
+      }
+
+      setResult(data.recommendations);
     } catch (error) {
       console.error("Search error:", error);
-      setError("Произошла ошибка при поиске. Пожалуйста, попробуйте еще раз.");
+      const message = error instanceof Error ? error.message : '';
+      setError(message || 'Не удалось выполнить поиск. Пожалуйста, попробуйте еще раз.');
     } finally {
       setLoading(false);
     }
@@ -245,9 +300,12 @@ export default function App() {
             <motion.div
               initial={{ opacity: 0, y: 10 }}
               animate={{ opacity: 1, y: 0 }}
-              className="mt-8 p-4 bg-red-50 border border-red-200 text-red-600 rounded-xl text-center"
+              className="mt-8 p-4 bg-red-50 border border-red-200 text-red-600 rounded-xl"
             >
-              {error}
+              <p className="font-semibold mb-2">Не удалось получить рекомендации</p>
+              <pre className="whitespace-pre-wrap text-sm leading-relaxed bg-red-100/60 p-3 rounded-lg border border-red-200 overflow-x-auto">
+                {error}
+              </pre>
             </motion.div>
           )}
 
@@ -294,47 +352,47 @@ export default function App() {
                           </p>
                           <p className="text-sm text-slate-900 font-medium">{option.estimatedCost}</p>
                         </div>
+
+                        {option.sources?.length > 0 && (
+                          <div className="bg-white p-4 rounded-xl border border-slate-200">
+                            <p className="text-sm font-bold text-slate-700 mb-3 flex items-center">
+                              <ExternalLink className="w-4 h-4 mr-1" /> Источники:
+                            </p>
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                              {option.sources.map((source, sourceIdx) => (
+                                (() => {
+                                  const safeSourceUrl = getSafeHttpUrl(source.url);
+                                  if (!safeSourceUrl) return null;
+
+                                  return (
+                                    <a
+                                      key={`${safeSourceUrl}-${sourceIdx}`}
+                                      href={safeSourceUrl}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      className="flex items-start p-3 rounded-lg border border-slate-200 hover:border-blue-400 hover:bg-blue-50/30 transition-all group"
+                                    >
+                                      <Globe className="w-4 h-4 mt-0.5 mr-2 text-slate-400 group-hover:text-blue-500 shrink-0" />
+                                      <span className="min-w-0">
+                                        <span className="block text-xs font-semibold text-slate-800 group-hover:text-blue-700 line-clamp-2">
+                                          {source.title || 'Перейти на сайт'}
+                                        </span>
+                                        <span className="block text-[10px] text-slate-400 truncate">
+                                          {getHostname(safeSourceUrl)}
+                                        </span>
+                                      </span>
+                                    </a>
+                                  );
+                                })()
+                              ))}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </motion.div>
                 ))}
               </div>
-
-              {sources.length > 0 && (
-                <div className="space-y-4">
-                  <h3 className="text-lg font-bold text-slate-800 flex items-center px-2">
-                    <ExternalLink className="w-5 h-5 mr-2 text-blue-600" />
-                    Источники и полезные ссылки
-                  </h3>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
-                    {sources.map((source, idx) => (
-                      <motion.a
-                        key={idx}
-                        href={source.uri}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        initial={{ opacity: 0, scale: 0.9 }}
-                        animate={{ opacity: 1, scale: 1 }}
-                        transition={{ delay: idx * 0.05 }}
-                        className="flex flex-col p-4 bg-white rounded-2xl border border-slate-200 shadow-sm hover:shadow-md hover:border-blue-400 hover:bg-blue-50/30 transition-all group relative overflow-hidden"
-                      >
-                        <div className="absolute top-0 left-0 w-1 h-full bg-blue-500 opacity-0 group-hover:opacity-100 transition-opacity" />
-                        <div className="mb-2">
-                          <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center group-hover:bg-blue-100 transition-colors">
-                            <Globe className="w-4 h-4 text-slate-400 group-hover:text-blue-500 transition-colors" />
-                          </div>
-                        </div>
-                        <p className="text-xs font-bold text-slate-800 line-clamp-2 mb-1 group-hover:text-blue-700 transition-colors">
-                          {source.title || 'Перейти на сайт'}
-                        </p>
-                        <p className="text-[10px] text-slate-400 truncate mt-auto">
-                          {new URL(source.uri).hostname}
-                        </p>
-                      </motion.a>
-                    ))}
-                  </div>
-                </div>
-              )}
             </motion.div>
           )}
         </AnimatePresence>

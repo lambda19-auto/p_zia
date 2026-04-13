@@ -1,11 +1,61 @@
 import express from 'express';
 import dotenv from 'dotenv';
+import { randomUUID } from 'node:crypto';
 
 dotenv.config();
 
 const app = express();
 const PORT = Number(process.env.PORT || 8787);
 const OPENAI_API_URL = 'https://api.openai.com/v1/responses';
+
+type LogLevel = 'info' | 'warn' | 'error';
+
+const log = (level: LogLevel, message: string, context?: Record<string, unknown>) => {
+  const entry = {
+    timestamp: new Date().toISOString(),
+    level,
+    message,
+    context,
+  };
+
+  if (level === 'error') {
+    console.error(JSON.stringify(entry));
+    return;
+  }
+
+  if (level === 'warn') {
+    console.warn(JSON.stringify(entry));
+    return;
+  }
+
+  console.log(JSON.stringify(entry));
+};
+
+app.use((req, res, next) => {
+  const startedAt = Date.now();
+  const requestId = randomUUID();
+
+  res.locals.requestId = requestId;
+  res.setHeader('x-request-id', requestId);
+
+  log('info', 'Incoming request', {
+    requestId,
+    method: req.method,
+    path: req.path,
+  });
+
+  res.on('finish', () => {
+    log('info', 'Request completed', {
+      requestId,
+      method: req.method,
+      path: req.path,
+      statusCode: res.statusCode,
+      durationMs: Date.now() - startedAt,
+    });
+  });
+
+  next();
+});
 
 app.use(express.json());
 
@@ -24,6 +74,12 @@ interface Recommendation {
   description: string;
   whyFits: string;
   estimatedCost: string;
+  sources: SourceLink[];
+}
+
+interface SourceLink {
+  title: string;
+  url: string;
 }
 
 interface OpenAIOutputTextContent {
@@ -45,6 +101,37 @@ interface OpenAIResponsePayload {
   }>;
 }
 
+interface ParsedRecommendationsPayload {
+  recommendations: Recommendation[];
+}
+
+interface ApiErrorResponse {
+  error: string;
+  debug?: {
+    code: string;
+    hint: string;
+    details?: string;
+  };
+}
+
+const sendApiError = (
+  res: express.Response<ApiErrorResponse>,
+  status: number,
+  error: string,
+  code: string,
+  hint: string,
+  details?: string,
+) => {
+  return res.status(status).json({
+    error,
+    debug: {
+      code,
+      hint,
+      details,
+    },
+  });
+};
+
 const buildPrompt = (body: RecommendationsRequestBody): string => {
   const budget = body.budget || 'medium';
   const season = body.season || 'summer';
@@ -60,22 +147,53 @@ const buildPrompt = (body: RecommendationsRequestBody): string => {
 - С детьми: ${hasChildren ? 'Да' : 'Нет'}
 
 Найди топ-3 лучших варианта для отдыха, соответствующих этим критериям.
-Для каждого варианта напиши название, краткое описание, почему он подходит, и примерную стоимость.
-Отвечай на русском языке.
+Для каждого варианта напиши:
+- title: название направления
+- description: краткое описание
+- whyFits: почему этот вариант подходит под критерии
+- estimatedCost: примерная стоимость
+- sources: минимум 1 источник c полями title и url
+
+Отвечай строго в формате JSON по заданной схеме, на русском языке.
   `.trim();
 };
 
 app.post('/api/recommendations', async (req, res) => {
+  const requestId = String(res.locals.requestId || 'unknown');
   const body = req.body as RecommendationsRequestBody;
+
   if (!body.query || !body.query.trim()) {
-    return res.status(400).json({ error: 'Query is required.' });
+    log('warn', 'Validation failed: empty query', { requestId });
+    return sendApiError(
+      res,
+      400,
+      'Query is required.',
+      'EMPTY_QUERY',
+      'Передайте в поле query текст запроса, например: "пляжный отдых".',
+    );
   }
 
   if (!process.env.OPENAI_API_KEY) {
-    return res.status(500).json({ error: 'OPENAI_API_KEY is not configured on server.' });
+    log('error', 'Missing OPENAI_API_KEY', { requestId });
+    return sendApiError(
+      res,
+      500,
+      'OPENAI_API_KEY is not configured on server.',
+      'MISSING_OPENAI_API_KEY',
+      'Создайте .env файл и добавьте OPENAI_API_KEY=<ваш_ключ>, затем перезапустите сервер.',
+    );
   }
 
   try {
+    log('info', 'Calling OpenAI responses API', {
+      requestId,
+      budget: body.budget || 'medium',
+      season: body.season || 'summer',
+      travelers: Math.max(1, Number(body.travelers || 1)),
+      hasChildren: Boolean(body.hasChildren),
+    });
+
+    const openaiStartedAt = Date.now();
     const openaiResponse = await fetch(OPENAI_API_URL, {
       method: 'POST',
       headers: {
@@ -92,20 +210,40 @@ app.post('/api/recommendations', async (req, res) => {
             name: 'travel_recommendations',
             strict: true,
             schema: {
-              type: 'array',
-              minItems: 3,
-              maxItems: 3,
-              items: {
-                type: 'object',
-                additionalProperties: false,
-                properties: {
-                  title: { type: 'string', description: 'Название направления' },
-                  description: { type: 'string', description: 'Краткое описание' },
-                  whyFits: { type: 'string', description: 'Почему этот вариант подходит под критерии' },
-                  estimatedCost: { type: 'string', description: 'Примерная стоимость' },
+              type: 'object',
+              additionalProperties: false,
+              properties: {
+                recommendations: {
+                  type: 'array',
+                  minItems: 3,
+                  maxItems: 3,
+                  items: {
+                    type: 'object',
+                    additionalProperties: false,
+                    properties: {
+                      title: { type: 'string', description: 'Название направления' },
+                      description: { type: 'string', description: 'Краткое описание' },
+                      whyFits: { type: 'string', description: 'Почему этот вариант подходит под критерии' },
+                      estimatedCost: { type: 'string', description: 'Примерная стоимость' },
+                      sources: {
+                        type: 'array',
+                        minItems: 1,
+                        items: {
+                          type: 'object',
+                          additionalProperties: false,
+                          properties: {
+                            title: { type: 'string' },
+                            url: { type: 'string' },
+                          },
+                          required: ['title', 'url'],
+                        },
+                      },
+                    },
+                    required: ['title', 'description', 'whyFits', 'estimatedCost', 'sources'],
+                  },
                 },
-                required: ['title', 'description', 'whyFits', 'estimatedCost'],
               },
+              required: ['recommendations'],
             },
           },
         },
@@ -114,33 +252,102 @@ app.post('/api/recommendations', async (req, res) => {
 
     if (!openaiResponse.ok) {
       const errorText = await openaiResponse.text();
-      return res.status(openaiResponse.status).json({ error: errorText });
+      log('error', 'OpenAI API request failed', {
+        requestId,
+        statusCode: openaiResponse.status,
+        durationMs: Date.now() - openaiStartedAt,
+        details: errorText,
+      });
+      return sendApiError(
+        res,
+        openaiResponse.status,
+        'Failed to get response from OpenAI API.',
+        'OPENAI_HTTP_ERROR',
+        'Проверьте валидность OPENAI_API_KEY, лимиты аккаунта и доступ к сети.',
+        errorText,
+      );
     }
 
     const data = (await openaiResponse.json()) as OpenAIResponsePayload;
+    log('info', 'OpenAI API request succeeded', {
+      requestId,
+      statusCode: openaiResponse.status,
+      durationMs: Date.now() - openaiStartedAt,
+    });
+
     const outputTextItems = (data.output || [])
       .flatMap((item) => item.content || [])
-      .filter((content): content is OpenAIOutputTextContent => content.type === 'output_text' && typeof content.text === 'string');
+      .filter(
+        (content): content is OpenAIOutputTextContent =>
+          content.type === 'output_text' && typeof content.text === 'string',
+      );
 
-    const jsonText = outputTextItems.map((item) => item.text || '').join('\n').trim();
-    const recommendations = JSON.parse(jsonText || '[]') as Recommendation[];
+    const jsonText = outputTextItems
+      .map((item) => item.text || '')
+      .join('\n')
+      .trim();
 
-    const sources = outputTextItems
-      .flatMap((item) => item.annotations || [])
-      .filter((annotation) => annotation.type === 'url_citation' && annotation.url_citation?.url)
-      .map((annotation) => ({
-        uri: annotation.url_citation!.url!,
-        title: annotation.url_citation!.title || annotation.url_citation!.url!,
-      }))
-      .filter((source, index, array) => array.findIndex((item) => item.uri === source.uri) === index);
+    if (!jsonText) {
+      log('error', 'OpenAI returned empty output_text', { requestId });
+      return sendApiError(
+        res,
+        502,
+        'OpenAI returned an empty structured response.',
+        'OPENAI_EMPTY_OUTPUT_TEXT',
+        'Проверьте формат ответа модели и наличие output_text в payload.',
+        JSON.stringify(data),
+      );
+    }
 
-    return res.json({ recommendations, sources });
+    const parsed = JSON.parse(jsonText) as ParsedRecommendationsPayload;
+
+    if (!parsed || !Array.isArray(parsed.recommendations)) {
+      log('error', 'OpenAI returned invalid structured payload', { requestId });
+      return sendApiError(
+        res,
+        502,
+        'OpenAI returned an invalid structured payload.',
+        'OPENAI_INVALID_STRUCTURED_PAYLOAD',
+        'Ожидался объект вида { recommendations: [...] }.',
+        jsonText,
+      );
+    }
+
+    const recommendations = parsed.recommendations.map((recommendation) => ({
+      ...recommendation,
+      sources: (recommendation.sources || [])
+        .filter((source) => source && typeof source.url === 'string' && source.url.trim())
+        .map((source) => ({
+          title: source.title || source.url,
+          url: source.url,
+        }))
+        .filter((source, index, array) => array.findIndex((item) => item.url === source.url) === index),
+    }));
+
+    log('info', 'Recommendations generated', {
+      requestId,
+      recommendationsCount: recommendations.length,
+    });
+
+    return res.json({ recommendations });
   } catch (error) {
-    console.error('Recommendations API error:', error);
-    return res.status(500).json({ error: 'Failed to get travel recommendations.' });
+    log('error', 'Recommendations API error', {
+      requestId,
+      error: error instanceof Error ? error.stack || error.message : String(error),
+    });
+    const details = error instanceof Error ? error.message : String(error);
+
+    return sendApiError(
+      res,
+      500,
+      'Failed to get travel recommendations.',
+      'RECOMMENDATIONS_UNEXPECTED_ERROR',
+      'Проверьте логи сервера и ответ OpenAI. Частая причина — невалидный JSON в ответе модели.',
+      details,
+    );
   }
 });
 
 app.listen(PORT, () => {
-  console.log(`API server listening on port ${PORT}`);
+  log('info', `API server listening on port ${PORT}`);
 });
