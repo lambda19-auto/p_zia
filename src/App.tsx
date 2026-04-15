@@ -54,8 +54,12 @@ export default function App() {
   const [showCookieBanner, setShowCookieBanner] = useState(false);
 
   useEffect(() => {
-    const hasAcceptedCookies = localStorage.getItem(cookieConsentKey) === 'true';
-    setShowCookieBanner(!hasAcceptedCookies);
+    try {
+      const hasAcceptedCookies = localStorage.getItem(cookieConsentKey) === 'true';
+      setShowCookieBanner(!hasAcceptedCookies);
+    } catch {
+      setShowCookieBanner(true);
+    }
   }, []);
 
   const getHostname = (url: string) => {
@@ -152,7 +156,11 @@ export default function App() {
   };
 
   const acceptCookieBanner = () => {
-    localStorage.setItem(cookieConsentKey, 'true');
+    try {
+      localStorage.setItem(cookieConsentKey, 'true');
+    } catch {
+      // Storage is unavailable (e.g. private mode); keep UI functional without persistence.
+    }
     setShowCookieBanner(false);
   };
 
