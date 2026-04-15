@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { 
   Search, 
   MapPin,
@@ -42,6 +42,7 @@ interface RecommendationsApiError {
 }
 
 export default function App() {
+  const cookieConsentKey = 'cookie-banner-cloudflare-accepted';
   const [query, setQuery] = useState('');
   const [budget, setBudget] = useState('medium');
   const [season, setSeason] = useState('summer');
@@ -50,6 +51,12 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<TravelRecommendation[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showCookieBanner, setShowCookieBanner] = useState(false);
+
+  useEffect(() => {
+    const hasAcceptedCookies = localStorage.getItem(cookieConsentKey) === 'true';
+    setShowCookieBanner(!hasAcceptedCookies);
+  }, []);
 
   const getHostname = (url: string) => {
     try {
@@ -142,6 +149,11 @@ export default function App() {
     } finally {
       setLoading(false);
     }
+  };
+
+  const acceptCookieBanner = () => {
+    localStorage.setItem(cookieConsentKey, 'true');
+    setShowCookieBanner(false);
   };
 
   return (
@@ -421,6 +433,23 @@ export default function App() {
           </p>
         </div>
       </footer>
+
+      {showCookieBanner && (
+        <div className="fixed inset-x-0 bottom-0 z-50 px-4 pb-4">
+          <div className="mx-auto max-w-4xl rounded-2xl bg-slate-900 text-white shadow-2xl border border-slate-700 p-4 md:p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <p className="text-sm md:text-base text-slate-100">
+              Мы используем Cloudflare для обеспечения безопасности и производительности сайта, а также файлы cookie для корректной работы сервиса.
+            </p>
+            <button
+              type="button"
+              onClick={acceptCookieBanner}
+              className="shrink-0 bg-blue-500 hover:bg-blue-400 text-white font-semibold px-5 py-2.5 rounded-xl transition-colors"
+            >
+              Понятно
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
