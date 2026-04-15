@@ -439,14 +439,14 @@ export default function App() {
 
       {showCookieBanner && (
         <div className="fixed inset-x-0 bottom-0 z-50 px-4 pb-4">
-          <div className="mx-auto max-w-4xl rounded-2xl bg-slate-900 text-white shadow-2xl border border-slate-700 p-4 md:p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-            <p className="text-sm md:text-base text-slate-100">
+          <div className="mx-auto max-w-4xl rounded-2xl bg-white text-slate-900 shadow-2xl border border-slate-200 p-4 md:p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+            <p className="text-sm md:text-base text-slate-600">
               Мы используем Cloudflare для обеспечения безопасности и производительности сайта, а также файлы cookie для корректной работы сервиса.
             </p>
             <button
               type="button"
               onClick={acceptCookieBanner}
-              className="shrink-0 bg-blue-500 hover:bg-blue-400 text-white font-semibold px-5 py-2.5 rounded-xl transition-colors"
+              className="shrink-0 bg-blue-600 hover:bg-blue-700 text-white font-semibold px-5 py-2.5 rounded-xl shadow-lg shadow-blue-200 transition-colors"
             >
               Понятно
             </button>
