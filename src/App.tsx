@@ -432,7 +432,7 @@ export default function App() {
             <span className="font-bold text-slate-400">TravelAI</span>
           </div>
           <p className="text-sm text-slate-500">
-            © 2026 TravelAI. Планируйте путешествия с умом.
+            © 2026 TravelAI. Планируйте путешествия с умом. lambda19.
           </p>
         </div>
       </footer>
